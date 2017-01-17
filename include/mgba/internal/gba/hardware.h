@@ -13,6 +13,7 @@ CXX_GUARD_START
 #include <mgba/core/log.h>
 #include <mgba/core/timing.h>
 #include <mgba/gba/interface.h>
+#include <mgba/internal/gba/sio/RFU.h>
 
 #include <time.h>
 
@@ -36,7 +37,8 @@ enum GBAHardwareDevice {
 	HW_GYRO = 8,
 	HW_TILT = 16,
 	HW_GB_PLAYER = 32,
-	HW_GB_PLAYER_DETECTION = 64
+	HW_GB_PLAYER_DETECTION = 64,
+	HW_RFU = 128
 };
 
 enum GPIORegister {
@@ -120,6 +122,8 @@ struct GBACartridgeHardware {
 	struct mTimingEvent gbpNextEvent;
 	struct GBAGBPKeyCallback gbpCallback;
 	struct GBAGBPSIODriver gbpDriver;
+
+	struct GBARFU rfu;
 };
 
 void GBAHardwareInit(struct GBACartridgeHardware* gpio, uint16_t* gpioBase);

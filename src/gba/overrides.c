@@ -7,6 +7,7 @@
 
 #include <mgba/internal/gba/gba.h>
 #include <mgba/internal/gba/hardware.h>
+#include <mgba/internal/gba/sio/RFU.h>
 
 #include <mgba-util/configuration.h>
 
@@ -100,13 +101,13 @@ static const struct GBACartridgeOverride _overrides[] = {
 	{ "AXPF", SAVEDATA_FLASH1M, HW_RTC, IDLE_LOOP_NONE, false },
 
 	// Pokemon Emerald
-	{ "BPEJ", SAVEDATA_FLASH1M, HW_RTC, 0x80008C6, false },
-	{ "BPEE", SAVEDATA_FLASH1M, HW_RTC, 0x80008C6, false },
-	{ "BPEP", SAVEDATA_FLASH1M, HW_RTC, 0x80008C6, false },
-	{ "BPEI", SAVEDATA_FLASH1M, HW_RTC, 0x80008C6, false },
-	{ "BPES", SAVEDATA_FLASH1M, HW_RTC, 0x80008C6, false },
-	{ "BPED", SAVEDATA_FLASH1M, HW_RTC, 0x80008C6, false },
-	{ "BPEF", SAVEDATA_FLASH1M, HW_RTC, 0x80008C6, false },
+	{ "BPEJ", SAVEDATA_FLASH1M, HW_RTC | HW_RFU, 0x80008C6, false },
+	{ "BPEE", SAVEDATA_FLASH1M, HW_RTC | HW_RFU, 0x80008C6, false },
+	{ "BPEP", SAVEDATA_FLASH1M, HW_RTC | HW_RFU, 0x80008C6, false },
+	{ "BPEI", SAVEDATA_FLASH1M, HW_RTC | HW_RFU, 0x80008C6, false },
+	{ "BPES", SAVEDATA_FLASH1M, HW_RTC | HW_RFU, 0x80008C6, false },
+	{ "BPED", SAVEDATA_FLASH1M, HW_RTC | HW_RFU, 0x80008C6, false },
+	{ "BPEF", SAVEDATA_FLASH1M, HW_RTC | HW_RFU, 0x80008C6, false },
 
 	// Pokemon Mystery Dungeon
 	{ "B24J", SAVEDATA_FLASH1M, HW_NONE, IDLE_LOOP_NONE, false },
@@ -115,22 +116,22 @@ static const struct GBACartridgeOverride _overrides[] = {
 	{ "B24U", SAVEDATA_FLASH1M, HW_NONE, IDLE_LOOP_NONE, false },
 
 	// Pokemon FireRed
-	{ "BPRJ", SAVEDATA_FLASH1M, HW_NONE, IDLE_LOOP_NONE, false },
-	{ "BPRE", SAVEDATA_FLASH1M, HW_NONE, IDLE_LOOP_NONE, false },
-	{ "BPRP", SAVEDATA_FLASH1M, HW_NONE, IDLE_LOOP_NONE, false },
-	{ "BPRI", SAVEDATA_FLASH1M, HW_NONE, IDLE_LOOP_NONE, false },
-	{ "BPRS", SAVEDATA_FLASH1M, HW_NONE, IDLE_LOOP_NONE, false },
-	{ "BPRD", SAVEDATA_FLASH1M, HW_NONE, IDLE_LOOP_NONE, false },
-	{ "BPRF", SAVEDATA_FLASH1M, HW_NONE, IDLE_LOOP_NONE, false },
+	{ "BPRJ", SAVEDATA_FLASH1M, HW_RFU, IDLE_LOOP_NONE, false },
+	{ "BPRE", SAVEDATA_FLASH1M, HW_RFU, IDLE_LOOP_NONE, false },
+	{ "BPRP", SAVEDATA_FLASH1M, HW_RFU, IDLE_LOOP_NONE, false },
+	{ "BPRI", SAVEDATA_FLASH1M, HW_RFU, IDLE_LOOP_NONE, false },
+	{ "BPRS", SAVEDATA_FLASH1M, HW_RFU, IDLE_LOOP_NONE, false },
+	{ "BPRD", SAVEDATA_FLASH1M, HW_RFU, IDLE_LOOP_NONE, false },
+	{ "BPRF", SAVEDATA_FLASH1M, HW_RFU, IDLE_LOOP_NONE, false },
 
 	// Pokemon LeafGreen
-	{ "BPGJ", SAVEDATA_FLASH1M, HW_NONE, IDLE_LOOP_NONE, false },
-	{ "BPGE", SAVEDATA_FLASH1M, HW_NONE, IDLE_LOOP_NONE, false },
-	{ "BPGP", SAVEDATA_FLASH1M, HW_NONE, IDLE_LOOP_NONE, false },
-	{ "BPGI", SAVEDATA_FLASH1M, HW_NONE, IDLE_LOOP_NONE, false },
-	{ "BPGS", SAVEDATA_FLASH1M, HW_NONE, IDLE_LOOP_NONE, false },
-	{ "BPGD", SAVEDATA_FLASH1M, HW_NONE, IDLE_LOOP_NONE, false },
-	{ "BPGF", SAVEDATA_FLASH1M, HW_NONE, IDLE_LOOP_NONE, false },
+	{ "BPGJ", SAVEDATA_FLASH1M, HW_RFU, IDLE_LOOP_NONE, false },
+	{ "BPGE", SAVEDATA_FLASH1M, HW_RFU, IDLE_LOOP_NONE, false },
+	{ "BPGP", SAVEDATA_FLASH1M, HW_RFU, IDLE_LOOP_NONE, false },
+	{ "BPGI", SAVEDATA_FLASH1M, HW_RFU, IDLE_LOOP_NONE, false },
+	{ "BPGS", SAVEDATA_FLASH1M, HW_RFU, IDLE_LOOP_NONE, false },
+	{ "BPGD", SAVEDATA_FLASH1M, HW_RFU, IDLE_LOOP_NONE, false },
+	{ "BPGF", SAVEDATA_FLASH1M, HW_RFU, IDLE_LOOP_NONE, false },
 
 	// RockMan EXE 4.5 - Real Operation
 	{ "BR4J", SAVEDATA_FLASH512, HW_RTC, IDLE_LOOP_NONE, false },
@@ -323,6 +324,13 @@ void GBAOverrideApply(struct GBA* gba, const struct GBACartridgeOverride* overri
 			gba->memory.hw.devices |= HW_GB_PLAYER_DETECTION;
 		} else {
 			gba->memory.hw.devices &= ~HW_GB_PLAYER_DETECTION;
+		}
+
+		if (override->hardware & HW_RFU) {
+			gba->memory.hw.devices |= HW_RFU;
+			GBAHardwareInitRFU(gba);
+		} else {
+			gba->memory.hw.devices &= ~HW_RFU;
 		}
 	}
 

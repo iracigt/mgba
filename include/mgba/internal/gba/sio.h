@@ -33,6 +33,36 @@ enum {
 	JOYSTAT_RECV_BIT = 2,
 };
 
+union GBASIOCNTUnion {
+    struct {
+        unsigned sc : 1;
+        unsigned internalSc : 1;
+        unsigned si : 1;
+        unsigned idleSo : 1;
+        unsigned : 3;
+        unsigned start : 1;
+        unsigned : 4;
+        unsigned length : 1;
+        unsigned : 1;
+        unsigned irq : 1;
+        unsigned : 1;
+    } normalControl;
+
+    struct {
+        unsigned baud : 2;
+        unsigned slave : 1;
+        unsigned ready : 1;
+        unsigned id : 2;
+        unsigned error : 1;
+        unsigned busy : 1;
+        unsigned : 6;
+        unsigned irq : 1;
+        unsigned : 1;
+    } multiplayerControl;
+
+    uint16_t siocnt;
+};
+
 struct GBASIODriverSet {
 	struct GBASIODriver* normal;
 	struct GBASIODriver* multiplayer;

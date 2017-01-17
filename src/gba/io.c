@@ -529,6 +529,8 @@ void GBAIOWrite(struct GBA* gba, uint32_t address, uint16_t value) {
 			gba->memory.io[REG_JOYSTAT >> 1] |= JOYSTAT_TRANS_BIT;
 			// Fall through
 		case REG_SIOMLT_SEND:
+		case REG_SIODATA32_HI:
+		case REG_SIODATA32_LO:
 		case REG_JOYCNT:
 		case REG_JOYSTAT:
 		case REG_JOY_RECV_LO:

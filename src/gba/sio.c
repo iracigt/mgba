@@ -27,6 +27,7 @@ static struct GBASIODriver* _lookupDriver(struct GBASIO* sio, enum GBASIOMode mo
 	case SIO_JOYBUS:
 		return sio->drivers.joybus;
 	default:
+		mLOG(GBA_SIO, STUB, "Mode change into unimplemented mode: 0x%02X PC: 0x%08X", mode, sio->p->cpu->gprs[ARM_PC]);
 		return 0;
 	}
 }

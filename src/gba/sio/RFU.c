@@ -94,7 +94,7 @@ uint16_t _RFUSioWriteRegister(struct GBASIODriver* driver, uint32_t address, uin
 				if (val.normalControl.start && !driver->p->p->memory.hw.rfu.xferPending) {
 
 					uint32_t rxData = (driver->p->p->memory.io[REG_SIODATA32_HI >> 1] << 16) | (driver->p->p->memory.io[REG_SIODATA32_LO >> 1]);
-					mLOG(GBA_RFU, INFO, "RFU RX: 0x%08X", rxData);
+					mLOG(GBA_RFU, DEBUG, "RFU RX: 0x%08X", rxData);
 
 					uint32_t xferData = _RFUTransferData(driver->p, rxData);
 
@@ -120,7 +120,7 @@ uint16_t _RFUSioWriteRegister(struct GBASIODriver* driver, uint32_t address, uin
 			mLOG(GBA_RFU, DEBUG, "REG_RCNT Write: 0x%04X", value);
 			break;
 		default:
-			mLOG(GBA_RFU, WARN, "Stub SIO Reg 0x%08X Write: 0x%04X", address, value);
+			mLOG(GBA_RFU, STUB, "Stub SIO Reg 0x%08X Write: 0x%04X", address, value);
 	}
 
 	return value;
@@ -157,7 +157,7 @@ uint32_t _RFUTransferData(struct GBASIO* sio, uint32_t sioData) {
 			rfu->currCmd = sioData & 0xFF; //cc
 			rfu->xferLen = (sioData >> 8) & 0xFF; //ll
 
-			mLOG(GBA_RFU, WARN, "RFU command 0x%02X of length 0x%02X", rfu->currCmd, rfu->xferLen);
+			mLOG(GBA_RFU, INFO, "RFU command 0x%02X of length 0x%02X", rfu->currCmd, rfu->xferLen);
 
 			if (!rfu->xferLen) {
 				_RFUExecCommand(rfu);
@@ -181,6 +181,8 @@ uint32_t _RFUTransferData(struct GBASIO* sio, uint32_t sioData) {
 			return rfu->xferBuf[rfu->xferIndex++];
 
 		case RFU_RECV:
+			//Note that a xferLen of 0 means send 1 word
+			//xferLen refers to the number of words beyond the acknowledge
 			rfu->xferBuf[rfu->xferIndex] = sioData;
 
 			rfu->xferIndex++;
@@ -202,8 +204,22 @@ void _RFUExecCommand(struct GBARFU* rfu) {
 	switch (rfu->currCmd) {
 			case 0x10: // Initialize
 			case 0x3D: // Initialize
+
+				rfu->hosting = false;
+
 				rfu->xferLen = 0;
 				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
+				_RFUSwitchState(rfu, RFU_TRANS);
+				break;
+
+			case 0x13: // Error checking
+				//TODO: Start broadcasting room name
+
+				rfu->xferLen = 1;
+				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
+				//TODO: What does real adapter uses as lower word?
+				//>800,000 copies sold in Japan alone, so not a true UUID, can't be unique
+				rfu->xferBuf[1] = ((rfu->hosting ? 0x100 : rfu->clientID) << 16) | ((0 << 3) + 0x61f1); // VBAM uses 0x61f1, 0 is player #
 				_RFUSwitchState(rfu, RFU_TRANS);
 				break;
 
@@ -221,14 +237,45 @@ void _RFUExecCommand(struct GBARFU* rfu) {
 				_RFUSwitchState(rfu, RFU_TRANS);
 				break;
 
-			case 0x1C: // Clear internal buffers
-				//TODO: Clear network buffers
+			case 0x19: // Listen for client to join
+				//TODO: Start broadcasting room name
+
+				rfu->hosting = true;
+				rfu->clientID = 0;
 
 				rfu->xferLen = 0;
 				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
 				_RFUSwitchState(rfu, RFU_TRANS);
 				break;
 
+			case 0x1A: // SERVER: Check for connection from a client
+				//TODO: Check for connection. Returns ID of adapter (maybe?) if connection availible, nothing otherwise
+
+				rfu->xferLen = 0;
+				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
+				_RFUSwitchState(rfu, RFU_TRANS);
+				break;
+
+			case 0x1B: // SERVER: Resets something without causing client disconnect
+				//TODO: ??? clear broadcast data something ???
+
+				rfu->xferLen = 0;
+				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
+				_RFUSwitchState(rfu, RFU_TRANS);
+				break;
+
+			case 0x1C: // Clear internal buffers
+				//TODO: Clear network buffers
+
+				rfu->hosting = false;
+
+				rfu->xferLen = 0;
+				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
+				_RFUSwitchState(rfu, RFU_TRANS);
+				break;
+
+			case 0x1E: //Also reset some stuff??
+				//TODO: Reset stuff
 			case 0x1D: // Read broadcast data
 				//TODO: Read from net buffer
 
@@ -245,13 +292,15 @@ void _RFUExecCommand(struct GBARFU* rfu) {
 				mLOG(GBA_RFU, WARN, "RFU Rx'd Err in state: 0x%02X", rfu->state);
 				_RFUSwitchState(rfu, RFU_INIT);
 				break;
+			default:
+				mLOG(GBA_RFU, WARN, "Unimplemented command: 0x%02X", rfu->currCmd);
 	}
 }
 
 void _RFUSendDataToGBA(struct GBA* gba, uint32_t data) {
 	gba->memory.io[REG_SIODATA32_HI >> 1] = (uint16_t) (data >> 16);
 	gba->memory.io[REG_SIODATA32_LO >> 1] = (uint16_t) data;
-	mLOG(GBA_RFU, INFO, "RFU TX: 0x%08X", data);
+	mLOG(GBA_RFU, DEBUG, "RFU TX: 0x%08X", data);
 
 	//Schedule IRQ
 	gba->memory.hw.rfu.xferPending = true;
@@ -285,6 +334,6 @@ void _RFUTransferCallback(struct mTiming* timing, void* user, uint32_t cyclesLat
 
 void _RFUBroadcastData(uint32_t* data, uint8_t len) {
 	for (int i = 0; i < len; ++i) {
-		mLOG(GBA_RFU, WARN, "BCAST \t0x%02X: 0x%08X", i, data[i]);
+		mLOG(GBA_RFU, INFO, "BCAST \t0x%02X: 0x%08X", i, data[i]);
 	}
 }

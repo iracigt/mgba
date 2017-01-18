@@ -42,6 +42,9 @@ struct GBARFU {
 	uint8_t currCmd;
 	bool polarityReversed;
 
+	bool hosting;
+	uint16_t clientID;
+
 };
 
 void GBAHardwareInitRFU(struct GBA* gba);

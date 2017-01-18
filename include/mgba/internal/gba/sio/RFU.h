@@ -35,7 +35,12 @@ struct GBARFU {
 
 	enum GBARFUState state;
 	bool xferPending;
+	uint32_t wordBuf;
+	uint32_t xferLen;
+	uint32_t xferIndex;
+	uint32_t xferBuf[255];
 	uint8_t currCmd;
+	bool polarityReversed;
 
 };
 

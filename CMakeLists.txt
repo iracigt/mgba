@@ -54,6 +54,7 @@ file(GLOB UTIL_TEST_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/util/test/*.c)
 file(GLOB GUI_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/util/gui/*.c ${CMAKE_CURRENT_SOURCE_DIR}/src/feature/gui/*.c)
 file(GLOB GBA_RENDERER_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/gba/renderers/*.c)
 file(GLOB GBA_SIO_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/gba/sio/lockstep.c)
+file(GLOB GBA_RFU_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/gba/sio/RFU.c)
 file(GLOB GB_SIO_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/gb/sio/lockstep.c)
 file(GLOB GB_RENDERER_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/gb/renderers/*.c)
 file(GLOB THIRD_PARTY_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/third-party/inih/*.c)
@@ -62,7 +63,7 @@ set(CORE_VFS_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/util/vfs/vfs-mem.c)
 set(VFS_SRC)
 source_group("ARM core" FILES ${ARM_SRC})
 source_group("LR35902 core" FILES ${LR35902_SRC})
-source_group("GBA board" FILES ${GBA_SRC} ${GBA_RENDERER_SRC} ${GBA_SIO_SRC})
+source_group("GBA board" FILES ${GBA_SRC} ${GBA_RENDERER_SRC} ${GBA_SIO_SRC} ${GBA_RFU_SRC})
 source_group("GBA extra" FILES ${GBA_CHEATS_SRC} ${GBA_RR_SRC})
 source_group("GB board" FILES ${GB_SRC} ${GB_SIO_SRC})
 source_group("Utilities" FILES ${UTIL_SRC})
@@ -631,7 +632,8 @@ if(NOT MINIMAL_CORE)
 		list(APPEND SRC
 			${GBA_RR_SRC}
 			${GBA_EXTRA_SRC}
-			${GBA_SIO_SRC})
+			${GBA_SIO_SRC}
+			${GBA_RFU_SRC})
 	endif()
 	if(M_CORE_GB)
 		list(APPEND SRC

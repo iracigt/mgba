@@ -7,23 +7,26 @@
 #define QGBA_LIBRARY_MODEL
 
 #include <QAbstractItemModel>
+#include <QStringList>
+#include <QThread>
 
 #include <mgba/core/library.h>
 
 struct VDir;
+struct VFile;
 
 namespace QGBA {
 
+class LibraryLoader;
 class LibraryModel : public QAbstractItemModel {
 Q_OBJECT
 
 public:
-	LibraryModel(QObject* parent = nullptr);
+	LibraryModel(const QString& path, QObject* parent = nullptr);
 	virtual ~LibraryModel();
 
-	void loadDirectory(VDir* dir);
-
-	const mLibraryEntry* entryAt(int row) const;
+	bool entryAt(int row, mLibraryEntry* out) const;
+	VFile* openVFile(const QModelIndex& index) const;
 
 	virtual QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
 	virtual QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override;
@@ -34,9 +37,40 @@ public:
 	virtual int columnCount(const QModelIndex& parent = QModelIndex()) const override;
 	virtual int rowCount(const QModelIndex& parent = QModelIndex()) const override;
 
-private:
-	mLibrary m_library;
+signals:
+	void doneLoading();
 
+public slots:
+	void loadDirectory(const QString& path);
+
+	void constrainBase(const QString& path);
+	void clearConstraints();
+
+private slots:
+	void directoryLoaded(const QString& path);
+
+private:
+	mLibrary* m_library;
+	mLibraryEntry m_constraints;
+	LibraryLoader* m_loader;
+	QThread m_loaderThread;
+	QStringList m_queue;
+};
+
+class LibraryLoader : public QObject {
+Q_OBJECT
+
+public:
+	LibraryLoader(mLibrary* library, QObject* parent = nullptr);
+
+public slots:
+	void loadDirectory(const QString& path);
+
+signals:
+	void directoryLoaded(const QString& path);
+
+private:
+	mLibrary* m_library;
 };
 
 }

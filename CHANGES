@@ -46,6 +46,9 @@ Misc:
  - Feature: Move game database from flatfile to SQLite3
  - GB Audio: Start implementing "zombie" audio (fixes mgba.io/i/389)
  - VFS: Fix some minor VFile issues with FILEs
+ - Core: Add generic checksum function
+ - Feature: Support ImageMagick 7
+ - All: Move time.h include to common.h
 
 0.5.2: (2016-12-31)
 Bugfixes:

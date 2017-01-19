@@ -9,40 +9,80 @@
 
 using namespace QGBA;
 
-LibraryModel::LibraryModel(QObject* parent)
+Q_DECLARE_METATYPE(mLibraryEntry);
+
+LibraryModel::LibraryModel(const QString& path, QObject* parent)
 	: QAbstractItemModel(parent)
 {
-	mLibraryInit(&m_library);
+	if (!path.isNull()) {
+		m_library = mLibraryLoad(path.toUtf8().constData());
+	} else {
+		m_library = mLibraryCreateEmpty();
+	}
+	memset(&m_constraints, 0, sizeof(m_constraints));
+	m_constraints.platform = PLATFORM_NONE;
+
+	if (!m_library) {
+		return;
+	}
+	m_loader = new LibraryLoader(m_library);
+	connect(m_loader, SIGNAL(directoryLoaded(const QString&)), this, SLOT(directoryLoaded(const QString&)));
+	m_loader->moveToThread(&m_loaderThread);
+	m_loaderThread.setObjectName("Library Loader Thread");
+	m_loaderThread.start();
 }
 
 LibraryModel::~LibraryModel() {
-	mLibraryDeinit(&m_library);
+	clearConstraints();
+	mLibraryDestroy(m_library);
+	m_loaderThread.quit();
+	m_loaderThread.wait();
 }
 
-void LibraryModel::loadDirectory(VDir* dir) {
-	mLibraryLoadDirectory(&m_library, dir);
+void LibraryModel::loadDirectory(const QString& path) {
+	m_queue.append(path);
+	QMetaObject::invokeMethod(m_loader, "loadDirectory", Q_ARG(const QString&, path));
 }
 
-const mLibraryEntry* LibraryModel::entryAt(int row) const {
-	if ((unsigned) row < mLibraryListingSize(&m_library.listing)) {
-		return mLibraryListingGetConstPointer(&m_library.listing, row);
+bool LibraryModel::entryAt(int row, mLibraryEntry* out) const {
+	mLibraryListing entries;
+	mLibraryListingInit(&entries, 0);
+	if (!mLibraryGetEntries(m_library, &entries, 1, row, &m_constraints)) {
+		mLibraryListingDeinit(&entries);
+		return false;
 	}
-	return nullptr;
+	*out = *mLibraryListingGetPointer(&entries, 0);
+	mLibraryListingDeinit(&entries);
+	return true;
+}
+
+VFile* LibraryModel::openVFile(const QModelIndex& index) const {
+	mLibraryEntry entry;
+	if (!entryAt(index.row(), &entry)) {
+		return nullptr;
+	}
+	return mLibraryOpenVFile(m_library, &entry);
 }
 
 QVariant LibraryModel::data(const QModelIndex& index, int role) const {
 	if (!index.isValid()) {
 		return QVariant();
 	}
+	mLibraryEntry entry;
+	if (!entryAt(index.row(), &entry)) {
+		return QVariant();
+	}
+	if (role == Qt::UserRole) {
+		return QVariant::fromValue(entry);
+	}
 	if (role != Qt::DisplayRole) {
 		return QVariant();
 	}
-	const mLibraryEntry* entry = mLibraryListingGetConstPointer(&m_library.listing, index.row());
 	switch (index.column()) {
 	case 0:
-		return entry->filename;
+		return entry.filename;
 	case 1:
-		return (unsigned long long) entry->filesize;
+		return (unsigned long long) entry.filesize;
 	}
 	return QVariant();
 }
@@ -84,5 +124,45 @@ int LibraryModel::rowCount(const QModelIndex& parent) const {
 	if (parent.isValid()) {
 		return 0;
 	}
-	return mLibraryListingSize(&m_library.listing);
+	return mLibraryCount(m_library, &m_constraints);
+}
+
+void LibraryModel::constrainBase(const QString& path) {
+	if (m_constraints.base) {
+		free(const_cast<char*>(m_constraints.base));
+	}
+	m_constraints.base = strdup(path.toUtf8().constData());
+}
+
+void LibraryModel::clearConstraints() {
+	if (m_constraints.base) {
+		free(const_cast<char*>(m_constraints.base));
+	}
+	if (m_constraints.filename) {
+		free(const_cast<char*>(m_constraints.filename));
+	}
+	if (m_constraints.title) {
+		free(const_cast<char*>(m_constraints.title));
+	}
+	memset(&m_constraints, 0, sizeof(m_constraints));
+}
+
+void LibraryModel::directoryLoaded(const QString& path) {
+	m_queue.removeOne(path);
+	beginResetModel();
+	endResetModel();
+	if (m_queue.empty()) {
+		emit doneLoading();
+	}
+}
+
+LibraryLoader::LibraryLoader(mLibrary* library, QObject* parent)
+	: QObject(parent)
+	, m_library(library)
+{
+}
+
+void LibraryLoader::loadDirectory(const QString& path) {
+	mLibraryLoadDirectory(m_library, path.toUtf8().constData());
+	emit directoryLoaded(path);
 }

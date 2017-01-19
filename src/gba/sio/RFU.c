@@ -47,20 +47,26 @@ bool _RFUReset(struct GBASIODriver* driver) {
 }
 
 void _RFUSwitchState(struct GBARFU* rfu, enum GBARFUState state) {
+
 	switch (state) {
 		case RFU_INIT:
 			//fallthrough
 		case RFU_READY:
 			rfu->polarityReversed = false;
-			//fallthrough
+
+			//DON'T fallthrough, resetting index messes up TRANS
+			//Makes trans always send index 0 as last index
+			break;
 		case RFU_TRANS:
 		case RFU_RECV:
 			rfu->xferIndex = 0;
 			//fallthrough
 		case RFU_WAITING:
 		case RFU_ERR:
-			rfu->state = state;
+			break;
 	}
+
+	rfu->state = state;
 }
 
 //PC = driver->p->p->cpu->gprs[ARM_PC]
@@ -134,7 +140,7 @@ uint32_t _RFUTransferData(struct GBASIO* sio, uint32_t sioData) {
 
 		case RFU_INIT:
 			//End of init sequence
-			if (sioData == 0xb0bb8001)
+			if (sioData == 0xB0BB8001)
 			{
 			    rfu->state = RFU_READY;
 				mLOG(GBA_RFU, INFO, "Adapter initialized!");

@@ -328,7 +328,7 @@ void GBAOverrideApply(struct GBA* gba, const struct GBACartridgeOverride* overri
 
 		if (override->hardware & HW_RFU) {
 			gba->memory.hw.devices |= HW_RFU;
-			GBAHardwareInitRFU(gba);
+			GBAHardwareRFUInit(gba);
 		} else {
 			gba->memory.hw.devices &= ~HW_RFU;
 		}

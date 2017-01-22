@@ -655,6 +655,10 @@ void GBAFrameEnded(struct GBA* gba) {
 		GBAHardwarePlayerUpdate(gba);
 	}
 
+	if (gba->memory.hw.devices & HW_RFU) {
+		GBAHardwareRFUUpdate(gba);
+	}
+
 	struct mCoreCallbacks* callbacks = gba->coreCallbacks;
 	if (callbacks && callbacks->videoFrameEnded) {
 		callbacks->videoFrameEnded(callbacks->context);

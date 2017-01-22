@@ -2,7 +2,8 @@
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ */
 
 #include <mgba/internal/gba/sio.h>
 #include <mgba/internal/gba/io.h>
@@ -22,7 +23,7 @@ void _RFUSwitchState(struct GBARFU* rfu, enum GBARFUState state);
 
 void _RFUBroadcastData(uint32_t* data, uint8_t len);
 
-void GBAHardwareInitRFU(struct GBA* gba) {
+void GBAHardwareRFUInit(struct GBA* gba) {
 
 	gba->memory.hw.rfu.d.init = 0;
 	gba->memory.hw.rfu.d.deinit = 0;
@@ -38,7 +39,13 @@ void GBAHardwareInitRFU(struct GBA* gba) {
 
 	gba->memory.hw.rfu.xferPending = false;
 
+	RFUClientInit(&gba->memory.hw.rfu.net);
+
 	GBASIOSetDriver(&gba->sio, &gba->memory.hw.rfu.d, SIO_NORMAL_32);
+}
+
+void GBAHardwareRFUUpdate(struct GBA* gba) {
+	RFUClientUpdate(&gba->memory.hw.rfu.net);
 }
 
 bool _RFUReset(struct GBASIODriver* driver) {
@@ -225,12 +232,12 @@ void _RFUExecCommand(struct GBARFU* rfu) {
 				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
 				//TODO: What does real adapter uses as lower word?
 				//>800,000 copies sold in Japan alone, so not a true UUID, can't be unique
-				rfu->xferBuf[1] = ((rfu->hosting ? 0x100 : rfu->clientID) << 16) | ((0 << 3) + 0x61f1); // VBAM uses 0x61f1, 0 is player #
+				rfu->xferBuf[1] = (rfu->hosting ? 0x100 : RFUClientGetClientID(&rfu->net) << 16) | ((0 << 3) + 0x61f1); // VBAM uses 0x61f1, 0 is player #
 				_RFUSwitchState(rfu, RFU_TRANS);
 				break;
 
 			case 0x16: // Broadcast data
-				_RFUBroadcastData(rfu->xferBuf, rfu->xferLen);
+				RFUClientSendBroadcastData(&rfu->net, rfu->xferBuf, rfu->xferLen);
 
 				rfu->xferLen = 0;
 				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
@@ -247,7 +254,7 @@ void _RFUExecCommand(struct GBARFU* rfu) {
 				//TODO: Start broadcasting room name
 
 				rfu->hosting = true;
-				rfu->clientID = 0;
+				//rfu->clientID = 0;
 
 				rfu->xferLen = 0;
 				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
@@ -284,12 +291,10 @@ void _RFUExecCommand(struct GBARFU* rfu) {
 				//TODO: Reset stuff
 			case 0x1D: // Read broadcast data
 				//TODO: Read from net buffer
+				;
+				uint32_t* bcastData = RFUClientGetBroadcastData(&rfu->net, &rfu->xferLen);
+				memcpy(rfu->xferBuf+1, bcastData, rfu->xferLen * sizeof(uint32_t));
 
-				for (int i = 1; i <= 7; ++i) {
-					rfu->xferBuf[i] = 0x00000000;
-				}
-
-				rfu->xferLen = 7;
 				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
 				_RFUSwitchState(rfu, RFU_TRANS);
 				break;
@@ -335,11 +340,5 @@ void _RFUTransferCallback(struct mTiming* timing, void* user, uint32_t cyclesLat
 
     if (rfu->d.p->normalControl.irq) {
 		GBARaiseIRQ(rfu->d.p->p, IRQ_SIO);
-	}
-}
-
-void _RFUBroadcastData(uint32_t* data, uint8_t len) {
-	for (int i = 0; i < len; ++i) {
-		mLOG(GBA_RFU, INFO, "BCAST \t0x%02X: 0x%08X", i, data[i]);
 	}
 }

@@ -11,6 +11,9 @@
 CXX_GUARD_START
 
 #include <mgba/core/log.h>
+#include <mgba/internal/gba/sio.h>
+#include <mgba/core/timing.h>
+#include <mgba/internal/gba/sio/RFUClient.h>
 
 mLOG_DECLARE_CATEGORY(GBA_RFU);
 
@@ -33,21 +36,27 @@ struct GBARFU {
 
 	struct mTimingEvent xferDoneEvent;
 
-	enum GBARFUState state;
-	bool xferPending;
+
 	uint32_t wordBuf;
-	uint32_t xferLen;
 	uint32_t xferIndex;
-	uint32_t xferBuf[255];
+	uint32_t xferBuf[256];
+
+	enum GBARFUState state;
+
 	uint8_t currCmd;
+	uint8_t xferLen;
+
 	bool polarityReversed;
+	bool xferPending;
 
 	bool hosting;
-	uint16_t clientID;
+
+	struct RFUClient net;
 
 };
 
-void GBAHardwareInitRFU(struct GBA* gba);
+void GBAHardwareRFUInit(struct GBA* gba);
+void GBAHardwareRFUUpdate(struct GBA* gba);
 
 CXX_GUARD_END
 

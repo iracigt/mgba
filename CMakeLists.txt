@@ -54,7 +54,7 @@ file(GLOB UTIL_TEST_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/util/test/*.c)
 file(GLOB GUI_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/util/gui/*.c ${CMAKE_CURRENT_SOURCE_DIR}/src/feature/gui/*.c)
 file(GLOB GBA_RENDERER_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/gba/renderers/*.c)
 file(GLOB GBA_SIO_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/gba/sio/lockstep.c)
-file(GLOB GBA_RFU_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/gba/sio/RFU.c)
+file(GLOB GBA_RFU_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/gba/sio/RFU.c ${CMAKE_CURRENT_SOURCE_DIR}/src/gba/sio/RFUClient.c)
 file(GLOB GB_SIO_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/gb/sio/lockstep.c)
 file(GLOB GB_RENDERER_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/gb/renderers/*.c)
 file(GLOB THIRD_PARTY_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/third-party/inih/*.c)
@@ -579,7 +579,7 @@ endif()
 
 if(M_CORE_GBA)
 	add_definitions(-DM_CORE_GBA)
-	list(APPEND CORE_SRC 
+	list(APPEND CORE_SRC
 		${ARM_SRC}
 		${GBA_SRC}
 		${GBA_CHEATS_SRC}

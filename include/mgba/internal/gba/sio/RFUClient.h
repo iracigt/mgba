@@ -11,6 +11,9 @@
 CXX_GUARD_START
 
 #include <mgba-util/socket.h>
+#include <mgba-util/vector.h>
+
+DECLARE_VECTOR(ClientList, uint32_t);
 
 enum RFUClientRXState {
     RFUCLIENT_LEN,
@@ -35,6 +38,10 @@ struct RFUClient {
 	uint8_t netCmd;
 	uint32_t clientID;
 
+    struct ClientList clientList;
+
+    bool dataPending;
+
 };
 
 void RFUClientInit(struct RFUClient* client);
@@ -43,10 +50,15 @@ void RFUClientDeInit(struct RFUClient* client);
 void RFUClientUpdate(struct RFUClient* client);
 
 void RFUClientSendBroadcastData(struct RFUClient* client, uint32_t* data, uint8_t len);
+void RFUClientSendDataToConnected(struct RFUClient* client, uint32_t* data, uint8_t len);
 
-uint32_t* RFUClientGetBroadcastData(struct RFUClient* client, uint8_t* len);
+uint32_t const* RFUClientGetBroadcastData(struct RFUClient* client, uint8_t* len);
 uint32_t RFUClientGetClientID(struct RFUClient* client);
 
+void RFUClientConnectToServer(struct RFUClient* client, uint32_t server);
+
+uint32_t const* RFUClientGetClientList(struct RFUClient* client, uint8_t* len);
+void RFUClientDisconnectAll(struct RFUClient* client);
 
 CXX_GUARD_END
 

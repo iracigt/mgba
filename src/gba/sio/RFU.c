@@ -39,6 +39,8 @@ void GBAHardwareRFUInit(struct GBA* gba) {
 
 	gba->memory.hw.rfu.xferPending = false;
 
+	gba->memory.hw.rfu.hosting = false;
+
 	RFUClientInit(&gba->memory.hw.rfu.net);
 
 	GBASIOSetDriver(&gba->sio, &gba->memory.hw.rfu.d, SIO_NORMAL_32);
@@ -225,14 +227,31 @@ void _RFUExecCommand(struct GBARFU* rfu) {
 				_RFUSwitchState(rfu, RFU_TRANS);
 				break;
 
-			case 0x13: // Error checking
-				//TODO: Start broadcasting room name
+			case 0x11: // Signal strength? Num connections?
+
+				//TODO: What does real adapter do?
+				//Perhaps each byte is signal strength of corresponding client
+				//0x44332211, where 0x00 is weakest and 0xFF is strongest
+				//TODO: base signal strength on ping?
+				rfu->xferBuf[1] = 0xFFFFFFFF;
+				rfu->xferLen = 1;
+
+				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
+				_RFUSwitchState(rfu, RFU_TRANS);
+				break;
+
+			case 0x14: // Something to do with error checking and client joining?
+			//VBAM does wierd stuff here. Bugs?
+			case 0x13: // Error checking? Get adapter ID?
+				//TODO: Start broadcasting room name?
 
 				rfu->xferLen = 1;
 				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
-				//TODO: What does real adapter uses as lower word?
+				//TODO: What does real adapter uses as lower half?
 				//>800,000 copies sold in Japan alone, so not a true UUID, can't be unique
-				rfu->xferBuf[1] = (rfu->hosting ? 0x100 : RFUClientGetClientID(&rfu->net) << 16) | ((0 << 3) + 0x61f1); // VBAM uses 0x61f1, 0 is player #
+				//Unless whole word is UUID, then 4 billion combos
+				//rfu->xferBuf[1] = (rfu->hosting ? 0x100 : RFUClientGetClientID(&rfu->net) << 16) | ((0 << 3) + 0x61f1); // VBAM uses 0x61f1, 0 is player #
+				rfu->xferBuf[1] = RFUClientGetClientID(&rfu->net);
 				_RFUSwitchState(rfu, RFU_TRANS);
 				break;
 
@@ -262,9 +281,15 @@ void _RFUExecCommand(struct GBARFU* rfu) {
 				break;
 
 			case 0x1A: // SERVER: Check for connection from a client
-				//TODO: Check for connection. Returns ID of adapter (maybe?) if connection availible, nothing otherwise
+				//Returns ID of adapter (maybe?) if connection availible, nothing otherwise
+				;
+				uint32_t const* clients = RFUClientGetClientList(&rfu->net, &rfu->xferLen);
 
-				rfu->xferLen = 0;
+				for (int i = 0; i < rfu->xferLen; i++) {
+					rfu->xferBuf[i+1] = clients[i];
+					mLOG(GBA_RFU, INFO, "Connection from 0x%08X", rfu->xferBuf[i+1]);
+				}
+
 				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
 				_RFUSwitchState(rfu, RFU_TRANS);
 				break;
@@ -290,11 +315,47 @@ void _RFUExecCommand(struct GBARFU* rfu) {
 			case 0x1E: //Also reset some stuff??
 				//TODO: Reset stuff
 			case 0x1D: // Read broadcast data
-				//TODO: Read from net buffer
 				;
-				uint32_t* bcastData = RFUClientGetBroadcastData(&rfu->net, &rfu->xferLen);
+				uint32_t const* bcastData = RFUClientGetBroadcastData(&rfu->net, &rfu->xferLen);
 				memcpy(rfu->xferBuf+1, bcastData, rfu->xferLen * sizeof(uint32_t));
 
+				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
+				_RFUSwitchState(rfu, RFU_TRANS);
+				break;
+
+			case 0x1F: //Connect to server
+				mLOG(GBA_RFU, INFO, "Connect to server 0x%08X", rfu->xferBuf[0]);
+				RFUClientConnectToServer(&rfu->net, rfu->xferBuf[0]);
+
+				rfu->xferLen = 0;
+				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
+				_RFUSwitchState(rfu, RFU_TRANS);
+				break;
+
+			case 0x20: // I have no idea what this does, related to 0x1F, probably implemented wrong
+			case 0x21: // I have no idea what this does, related to 0x1F, probably implemented wrong
+				//TODO: What does real adapter do? More research needed
+				//Guessing here, maybe connection ACK?
+				//Game repeats this then after a while says the trainer is not available
+				rfu->xferBuf[1] = 0x00000000;
+
+				rfu->xferLen = 1;
+				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
+
+				_RFUSwitchState(rfu, RFU_TRANS);
+				break;
+
+			case 0x24: //Send data to connected adapters
+				RFUClientSendDataToConnected(&rfu->net, rfu->xferBuf, rfu->xferLen);
+
+				rfu->xferLen = 0;
+				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
+				_RFUSwitchState(rfu, RFU_TRANS);
+				break;
+
+			case 0x26: //Receive data. Returns pending data
+			 	//TODO: Read from network queue
+				rfu->xferLen = 0;
 				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
 				_RFUSwitchState(rfu, RFU_TRANS);
 				break;

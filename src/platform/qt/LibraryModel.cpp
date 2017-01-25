@@ -5,49 +5,99 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include "LibraryModel.h"
 
+#include <QFontMetrics>
+
 #include <mgba-util/vfs.h>
 
 using namespace QGBA;
 
 Q_DECLARE_METATYPE(mLibraryEntry);
 
+QMap<QString, LibraryModel::LibraryHandle*> LibraryModel::s_handles;
+QMap<QString, LibraryModel::LibraryColumn> LibraryModel::s_columns;
+
 LibraryModel::LibraryModel(const QString& path, QObject* parent)
 	: QAbstractItemModel(parent)
 {
+	if (s_columns.empty()) {
+		s_columns["filename"] = {
+			tr("Filename"),
+			[](const mLibraryEntry& e) -> QString {
+				return e.filename;
+			}
+		};
+		s_columns["size"] = {
+			tr("Size"),
+			[](const mLibraryEntry& e) -> QString {
+				double size = e.filesize;
+				QString unit = "B";
+				if (size > 1024.0) {
+					size /= 1024.0;
+					unit = "kiB";
+				}
+				if (size > 1024.0) {
+					size /= 1024.0;
+					unit = "MiB";
+				}
+				return QString("%0 %1").arg(size, 0, 'f', 1).arg(unit);
+			}
+		};
+		s_columns["platform"] = {
+			tr("Platform"),
+			[](const mLibraryEntry& e) -> QString {
+				int platform = e.platform;
+				switch (platform) {
+#ifdef M_CORE_GBA
+				case PLATFORM_GBA:
+					return tr("GBA");
+#endif
+#ifdef M_CORE_GB
+				case PLATFORM_GB:
+					return tr("GB");
+#endif
+				default:
+					return tr("?");
+				}
+			}
+		};
+	}
 	if (!path.isNull()) {
-		m_library = mLibraryLoad(path.toUtf8().constData());
+		if (s_handles.contains(path)) {
+			m_library = s_handles[path];
+			m_library->ref();
+		} else {
+			m_library = new LibraryHandle(mLibraryLoad(path.toUtf8().constData()), path);
+			s_handles[path] = m_library;
+		}
 	} else {
-		m_library = mLibraryCreateEmpty();
+		m_library = new LibraryHandle(mLibraryCreateEmpty());
 	}
 	memset(&m_constraints, 0, sizeof(m_constraints));
 	m_constraints.platform = PLATFORM_NONE;
+	m_columns.append(s_columns["filename"]);
+	m_columns.append(s_columns["platform"]);
+	m_columns.append(s_columns["size"]);
 
-	if (!m_library) {
-		return;
-	}
-	m_loader = new LibraryLoader(m_library);
-	connect(m_loader, SIGNAL(directoryLoaded(const QString&)), this, SLOT(directoryLoaded(const QString&)));
-	m_loader->moveToThread(&m_loaderThread);
-	m_loaderThread.setObjectName("Library Loader Thread");
-	m_loaderThread.start();
+	connect(m_library->loader, SIGNAL(directoryLoaded(const QString&)), this, SLOT(directoryLoaded(const QString&)));
 }
 
 LibraryModel::~LibraryModel() {
 	clearConstraints();
-	mLibraryDestroy(m_library);
-	m_loaderThread.quit();
-	m_loaderThread.wait();
+	if (!m_library->deref()) {
+		s_handles.remove(m_library->path);
+		delete m_library;
+	}
 }
 
 void LibraryModel::loadDirectory(const QString& path) {
 	m_queue.append(path);
-	QMetaObject::invokeMethod(m_loader, "loadDirectory", Q_ARG(const QString&, path));
+	QMetaObject::invokeMethod(m_library->loader, "loadDirectory", Q_ARG(const QString&, path));
 }
 
 bool LibraryModel::entryAt(int row, mLibraryEntry* out) const {
 	mLibraryListing entries;
 	mLibraryListingInit(&entries, 0);
-	if (!mLibraryGetEntries(m_library, &entries, 1, row, &m_constraints)) {
+	if (!mLibraryGetEntries(m_library->library, &entries, 1, row, &m_constraints)) {
 		mLibraryListingDeinit(&entries);
 		return false;
 	}
@@ -61,7 +111,7 @@ VFile* LibraryModel::openVFile(const QModelIndex& index) const {
 	if (!entryAt(index.row(), &entry)) {
 		return nullptr;
 	}
-	return mLibraryOpenVFile(m_library, &entry);
+	return mLibraryOpenVFile(m_library->library, &entry);
 }
 
 QVariant LibraryModel::data(const QModelIndex& index, int role) const {
@@ -75,16 +125,19 @@ QVariant LibraryModel::data(const QModelIndex& index, int role) const {
 	if (role == Qt::UserRole) {
 		return QVariant::fromValue(entry);
 	}
-	if (role != Qt::DisplayRole) {
+	if (index.column() >= m_columns.count()) {
 		return QVariant();
 	}
-	switch (index.column()) {
-	case 0:
-		return entry.filename;
-	case 1:
-		return (unsigned long long) entry.filesize;
+	switch (role) {
+	case Qt::DisplayRole:
+		return m_columns[index.column()].value(entry);
+	case Qt::SizeHintRole: {
+		QFontMetrics fm((QFont()));
+		return fm.size(Qt::TextSingleLine, m_columns[index.column()].value(entry));
 	}
-	return QVariant();
+	default:
+		return QVariant();
+	}
 }
 
 QVariant LibraryModel::headerData(int section, Qt::Orientation orientation, int role) const {
@@ -92,12 +145,10 @@ QVariant LibraryModel::headerData(int section, Qt::Orientation orientation, int 
 		return QAbstractItemModel::headerData(section, orientation, role);
 	}
 	if (orientation == Qt::Horizontal) {
-		switch (section) {
-		case 0:
-			return tr("Filename");
-		case 1:
-			return tr("Size");
+		if (section >= m_columns.count()) {
+			return QVariant();
 		}
+		return m_columns[section].name;
 	}
 	return section;
 }
@@ -117,14 +168,14 @@ int LibraryModel::columnCount(const QModelIndex& parent) const {
 	if (parent.isValid()) {
 		return 0;
 	}
-	return 2;
+	return m_columns.count();
 }
 
 int LibraryModel::rowCount(const QModelIndex& parent) const {
 	if (parent.isValid()) {
 		return 0;
 	}
-	return mLibraryCount(m_library, &m_constraints);
+	return mLibraryCount(m_library->library, &m_constraints);
 }
 
 void LibraryModel::constrainBase(const QString& path) {
@@ -154,6 +205,36 @@ void LibraryModel::directoryLoaded(const QString& path) {
 	if (m_queue.empty()) {
 		emit doneLoading();
 	}
+}
+
+
+LibraryModel::LibraryHandle::LibraryHandle(mLibrary* lib, const QString& p)
+	: library(lib)
+	, loader(new LibraryLoader(library))
+	, path(p)
+	, m_ref(1)
+{
+	if (!library) {
+		return;
+	}
+	loader->moveToThread(&m_loaderThread);
+	m_loaderThread.setObjectName("Library Loader Thread");
+	m_loaderThread.start();
+}
+
+LibraryModel::LibraryHandle::~LibraryHandle() {
+	m_loaderThread.quit();
+	m_loaderThread.wait();
+	mLibraryDestroy(library);
+}
+
+void LibraryModel::LibraryHandle::ref() {
+	++m_ref;
+}
+
+bool LibraryModel::LibraryHandle::deref() {
+	--m_ref;
+	return m_ref > 0;
 }
 
 LibraryLoader::LibraryLoader(mLibrary* library, QObject* parent)

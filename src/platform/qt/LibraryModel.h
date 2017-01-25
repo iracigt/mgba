@@ -12,6 +12,8 @@
 
 #include <mgba/core/library.h>
 
+#include <functional>
+
 struct VDir;
 struct VFile;
 
@@ -50,11 +52,36 @@ private slots:
 	void directoryLoaded(const QString& path);
 
 private:
-	mLibrary* m_library;
+	struct LibraryColumn {
+		QString name;
+		std::function<QString(const mLibraryEntry&)> value;
+	};
+
+	class LibraryHandle {
+	public:
+		LibraryHandle(mLibrary*, const QString& path = QString());
+		~LibraryHandle();
+
+		mLibrary* const library;
+		LibraryLoader* const loader;
+		const QString path;
+
+		void ref();
+		bool deref();
+
+	private:
+		QThread m_loaderThread;
+		size_t m_ref;
+	};
+
+	LibraryHandle* m_library;
+	static QMap<QString, LibraryHandle*> s_handles;
+
 	mLibraryEntry m_constraints;
-	LibraryLoader* m_loader;
-	QThread m_loaderThread;
 	QStringList m_queue;
+
+	QList<LibraryColumn> m_columns;
+	static QMap<QString, LibraryColumn> s_columns;
 };
 
 class LibraryLoader : public QObject {

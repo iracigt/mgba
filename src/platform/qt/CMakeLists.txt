@@ -83,6 +83,7 @@ set(SOURCE_FILES
 	GameController.cpp
 	GamepadAxisEvent.cpp
 	GamepadButtonEvent.cpp
+	GamepadHatEvent.cpp
 	IOViewer.cpp
 	InputController.cpp
 	InputProfile.cpp
@@ -119,6 +120,7 @@ set(UI_FILES
 	DebuggerConsole.ui
 	GIFView.ui
 	IOViewer.ui
+	LibraryView.ui
 	LoadSaveState.ui
 	LogView.ui
 	MemoryView.ui
@@ -190,7 +192,8 @@ endif()
 if(USE_SQLITE3)
 	list(APPEND SOURCE_FILES
 		ArchiveInspector.cpp
-		LibraryModel.cpp)
+		LibraryModel.cpp
+		LibraryView.cpp)
 endif()
 
 qt5_add_resources(RESOURCES resources.qrc)

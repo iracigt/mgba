@@ -9,10 +9,13 @@
  #include <mgba/internal/gba/sio/RFUClient.h>
  #include <mgba/core/log.h>
  #include <mgba/internal/gba/sio/rfu.h>
+ #include <mgba/internal/gba/gba.h>
+ #include <stdio.h>
 
 void _RFUClientExecCommand(struct RFUClient* client);
 
 DEFINE_VECTOR(ClientList, uint32_t);
+DEFINE_QUEUE(MessageQueue, struct Message);
 
 void RFUClientInit(struct RFUClient* client) {
     // Init socket subsystem
@@ -26,6 +29,7 @@ void RFUClientInit(struct RFUClient* client) {
     client->state = RFUCLIENT_ERR;
 
     ClientListInit(&client->clientList, 0);
+    MessageQueueInit(&client->msgQueue);
     client->dataPending = false;
 
     SocketSubsystemInit();
@@ -55,6 +59,7 @@ void RFUClientDeInit(struct RFUClient* client) {
     SocketClose(client->socket);
     SocketSubsystemDeinit();
     ClientListDeinit(&client->clientList);
+    MessageQueueDeinit(&client->msgQueue);
 }
 
 void RFUClientUpdate(struct RFUClient* client) {
@@ -147,7 +152,7 @@ void _RFUClientExecCommand(struct RFUClient* client) {
                 client->bcastLen = client->netLen;
                 for (int i = 0; i < client->bcastLen; ++i) {
                     client->bcastData[i] = ntohl(rxBuf[i]);
-                    mLOG(GBA_RFU, INFO, "BCAST RX \t0x%02X: 0x%08X", i, client->bcastData[i]);
+                    mLOG(GBA_RFU, DEBUG, "BCAST RX \t0x%02X: 0x%08X", i, client->bcastData[i]);
                 }
             }
             break;
@@ -157,9 +162,26 @@ void _RFUClientExecCommand(struct RFUClient* client) {
                 uint32_t* rxBuf = (uint32_t*)client->rxBuf;
                 client->bcastLen = client->netLen;
                 for (int i = 0; i < client->bcastLen; ++i) {
+                    //Should the list be maintained server-side or client-side?
                     *ClientListAppend(&client->clientList) = ntohl(rxBuf[i]);
-                    mLOG(GBA_RFU, INFO, "CONN RX: 0x%08X", ntohl(rxBuf[i]));
+                    mLOG(GBA_RFU, INFO, "Connection from: 0x%08X", ntohl(rxBuf[i]));
                 }
+            }
+            break;
+
+        case 0x26:
+            {
+                struct Message msg;
+                msg.len = client->netLen;
+                msg.data = malloc(msg.len * sizeof(uint32_t));
+                uint32_t* rxBuf = (uint32_t*)client->rxBuf;
+
+                for (int i = 0; i < msg.len; ++i) {
+                    msg.data[i] = ntohl(rxBuf[i]);
+                    mLOG(GBA_RFU, INFO, "DATA RX \t0x%02X: 0x%08X", i, msg.data[i]);
+                }
+                MessageQueueClear(&client->msgQueue);
+                MessageQueueEnqueue(&client->msgQueue, msg);
             }
             break;
 
@@ -192,7 +214,7 @@ void RFUClientSendBroadcastData(struct RFUClient* client, uint32_t* data, uint8_
     //Send out data
 
     for (int i = 0; i < len; ++i) {
-		mLOG(GBA_RFU, INFO, "BCAST \t0x%02X: 0x%08X", i, data[i]);
+		mLOG(GBA_RFU, DEBUG, "BCAST \t0x%02X: 0x%08X", i, data[i]);
 	}
 
     uint32_t txBuf = len << 24 | 0x00160000 | ((client->clientID) & 0xFFFF);
@@ -224,8 +246,29 @@ void RFUClientConnectToServer(struct RFUClient* client, uint32_t server) {
 }
 
 uint32_t const* RFUClientGetBroadcastData(struct RFUClient* client, uint8_t* len) {
+    //TODO: Convert to copying into an inout buffer
     *len = client->bcastLen;
     return client->bcastData;
+}
+
+void RFUClientReadMessage(struct RFUClient* client, uint32_t* buf, uint8_t* len) {
+    if (RFUClientMessageAvailable(client)) {
+        struct Message msg = MessageQueueDequeue(&client->msgQueue);
+        *len = msg.len;
+        memcpy(buf, msg.data, msg.len * sizeof(uint32_t));
+
+        for (int i = 0; i < *len; i++) {
+            mLOG(GBA_RFU, INFO, "RECV \t0x%02X: 0x%08X", i, buf[i]);
+        }
+
+        free(msg.data);
+    } else {
+        *len = 0;
+    }
+}
+
+bool RFUClientMessageAvailable(struct RFUClient* client) {
+    return !MessageQueueEmpty(&client->msgQueue);
 }
 
 uint32_t RFUClientGetClientID(struct RFUClient* client) {

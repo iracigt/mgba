@@ -16,7 +16,7 @@ mLOG_DEFINE_CATEGORY(GBA_RFU, "GBA RFU");
 uint16_t _RFUSioWriteRegister(struct GBASIODriver* driver, uint32_t address, uint16_t value);
 bool _RFUReset(struct GBASIODriver* driver);
 uint32_t _RFUTransferData(struct GBASIO* gbaSIO, uint32_t sioData);
-void _RFUSendDataToGBA(struct GBA* gba, uint32_t data);
+void _RFUSendDataToGBA(struct GBA* gba, uint32_t data, bool delay);
 void _RFUTransferCallback();
 void _RFUExecCommand(struct GBARFU* rfu);
 void _RFUSwitchState(struct GBARFU* rfu, enum GBARFUState state);
@@ -25,9 +25,9 @@ void _RFUBroadcastData(uint32_t* data, uint8_t len);
 
 void GBAHardwareRFUInit(struct GBA* gba) {
 
-	gba->memory.hw.rfu.d.init = 0;
+	gba->memory.hw.rfu.d.init = _RFUReset;
 	gba->memory.hw.rfu.d.deinit = 0;
-	gba->memory.hw.rfu.d.load = _RFUReset;
+	gba->memory.hw.rfu.d.load = 0;//_RFUReset;
 	gba->memory.hw.rfu.d.unload = 0;
 
 	gba->memory.hw.rfu.d.writeRegister = _RFUSioWriteRegister;
@@ -38,7 +38,7 @@ void GBAHardwareRFUInit(struct GBA* gba) {
 	gba->memory.hw.rfu.xferDoneEvent.priority = 0x80;
 
 	gba->memory.hw.rfu.xferPending = false;
-
+	//gba->memory.hw.rfu.doRevPolarity = false;
 	gba->memory.hw.rfu.hosting = false;
 
 	RFUClientInit(&gba->memory.hw.rfu.net);
@@ -47,11 +47,23 @@ void GBAHardwareRFUInit(struct GBA* gba) {
 }
 
 void GBAHardwareRFUUpdate(struct GBA* gba) {
-	RFUClientUpdate(&gba->memory.hw.rfu.net);
+
+	struct GBARFU* rfu = &gba->memory.hw.rfu;
+
+	RFUClientUpdate(&rfu->net);
+
+	if ((rfu->state == RFU_WAITING) && RFUClientMessageAvailable(&rfu->net)) {
+		rfu->polarityReversed = true;
+		_RFUSendDataToGBA(gba, 0x99660028, false);
+		_RFUSwitchState(rfu, RFU_READY);
+		//rfu->polarityReversed = false;
+	}
 }
 
 bool _RFUReset(struct GBASIODriver* driver) {
 	_RFUSwitchState(&driver->p->p->memory.hw.rfu, RFU_INIT);
+	mLOG(GBA_RFU, INFO, "Adapter reset");
+	printf("%s","Adapter reset\n");
 	return true; //????
 }
 
@@ -60,8 +72,11 @@ void _RFUSwitchState(struct GBARFU* rfu, enum GBARFUState state) {
 	switch (state) {
 		case RFU_INIT:
 			//fallthrough
-		case RFU_READY:
 			rfu->polarityReversed = false;
+		case RFU_READY:
+			//A roundabout way of making it so that polarity reversion takes effect after we finish sending the reply data
+			//rfu->polarityReversed = rfu->doRevPolarity;
+			//rfu->doRevPolarity = false;
 
 			//DON'T fallthrough, resetting index messes up TRANS
 			//Makes trans always send index 0 as last index
@@ -82,12 +97,14 @@ void _RFUSwitchState(struct GBARFU* rfu, enum GBARFUState state) {
 uint16_t _RFUSioWriteRegister(struct GBASIODriver* driver, uint32_t address, uint16_t value) {
 	switch (address) {
 			case REG_SIOCNT:
-				mLOG(GBA_RFU, DEBUG, "REG_SIOCNT Write: 0x%04x PC: 0x%08X", value, driver->p->p->cpu->gprs[ARM_PC]);//(driver->p->p->memory.io[REG_SIODATA32_HI >> 1] << 16) | (driver->p->p->memory.io[REG_SIODATA32_LO >> 1]));
-
+				;
 				struct GBARFU* rfu = &driver->p->p->memory.hw.rfu;
                 union GBASIOCNTUnion val;
                 val.siocnt = value;
 
+				uint32_t rxData = (driver->p->p->memory.io[REG_SIODATA32_HI >> 1] << 16) | (driver->p->p->memory.io[REG_SIODATA32_LO >> 1]);
+				mLOG(GBA_RFU, DEBUG, "REG_SIOCNT Write: 0x%04x PC: 0x%08X Rev: %d", value, driver->p->p->cpu->gprs[ARM_PC], rfu->polarityReversed);//(driver->p->p->memory.io[REG_SIODATA32_HI >> 1] << 16) | (driver->p->p->memory.io[REG_SIODATA32_LO >> 1]));
+				//mLOG(GBA_RFU, INFO, "RX DATA: 0x%08X STATE: 0x%02X", rxData, rfu->state);
 				//Acknowledge procedure ??
 				// if (val.normalControl.idleSo) {
 				// 	val.normalControl.si = 0;
@@ -95,10 +112,14 @@ uint16_t _RFUSioWriteRegister(struct GBASIODriver* driver, uint32_t address, uin
 				// 	val.normalControl.si = 1;
 				// }
 
-				if (val.normalControl.idleSo) {
-					val.normalControl.si = rfu->polarityReversed;
-				} else {
-					val.normalControl.si = !rfu->polarityReversed;
+				// if (val.normalControl.idleSo) {
+				// 	val.normalControl.si = rfu->polarityReversed;
+				// } else {
+				// 	val.normalControl.si = !rfu->polarityReversed;
+				// }
+
+				if (rfu->polarityReversed) {
+					val.normalControl.si = !val.normalControl.si;
 				}
 
 				//Fix for Mario Golf, force the clock speed to 2 MHz. Why is this needed?
@@ -106,18 +127,38 @@ uint16_t _RFUSioWriteRegister(struct GBASIODriver* driver, uint32_t address, uin
 					val.normalControl.internalSc = 1;
 				}
 
-				if (val.normalControl.start && !driver->p->p->memory.hw.rfu.xferPending) {
+				//Transfer with internal clock, used for most commands
+				if (val.normalControl.start && !rfu->xferPending && val.normalControl.sc) {
 
-					uint32_t rxData = (driver->p->p->memory.io[REG_SIODATA32_HI >> 1] << 16) | (driver->p->p->memory.io[REG_SIODATA32_LO >> 1]);
+					//uint32_t rxData = (driver->p->p->memory.io[REG_SIODATA32_HI >> 1] << 16) | (driver->p->p->memory.io[REG_SIODATA32_LO >> 1]);
 					mLOG(GBA_RFU, DEBUG, "RFU RX: 0x%08X", rxData);
+					//printf("RFU RX: 0x%08X\n", rxData);
 
 					uint32_t xferData = _RFUTransferData(driver->p, rxData);
 
-					_RFUSendDataToGBA(driver->p->p, xferData);
+					_RFUSendDataToGBA(driver->p->p, xferData, true);
 
+				//Transfer with external clock, used for blocking commands
+			} else if (val.normalControl.start && !rfu->xferPending && !val.normalControl.sc) { //  && (rfu->state != RFU_INIT)
+					mLOG(GBA_RFU, DEBUG, "Ext clock transfer: 0x%08X", rxData);
+					//printf("RFU ERX: 0x%08X\n", rxData);
+					if (rxData == 0x996600A8) {
+						//Read GBA's ack of 0x28
+						//rfu->polarityReversed = true;
+						_RFUSendDataToGBA(driver->p->p, 0x80000000, true);
+						_RFUSwitchState(rfu, RFU_READY);
+
+					} else if (rxData == 0x80000000) {
+						_RFUSwitchState(rfu, RFU_WAITING);
+					} else {
+						//Error
+						mLOG(GBA_RFU, WARN, "Invalid ext clock transfer: 0x%08X", rxData);
+						//_RFUSendDataToGBA(driver->p->p, 0x996600EE, true);
+						//_RFUSwitchState(rfu, RFU_ERR);
+						_RFUSwitchState(rfu, RFU_INIT);
+
+					}
 				}
-
-
 
                 value = val.siocnt;
 				// Caller does this
@@ -166,13 +207,13 @@ uint32_t _RFUTransferData(struct GBASIO* sio, uint32_t sioData) {
 			//All commands start with 0x9966
 			if (sioData >> 16 != 0x9966) {
 				mLOG(GBA_RFU, WARN, "Invalid RFU command string: 0x%08X", sioData);
-				return 0x996600EE;
+				break;
 			}
 
 			rfu->currCmd = sioData & 0xFF; //cc
 			rfu->xferLen = (sioData >> 8) & 0xFF; //ll
 
-			mLOG(GBA_RFU, INFO, "RFU command 0x%02X of length 0x%02X", rfu->currCmd, rfu->xferLen);
+			mLOG(GBA_RFU, DEBUG, "RFU command 0x%02X of length 0x%02X", rfu->currCmd, rfu->xferLen);
 
 			if (!rfu->xferLen) {
 				_RFUExecCommand(rfu);
@@ -207,11 +248,16 @@ uint32_t _RFUTransferData(struct GBASIO* sio, uint32_t sioData) {
 
 			return 0x80000000;
 
+		case RFU_WAITING:
+		case RFU_ERR:
+			 break;
+
 		default:
 			mLOG(GBA_RFU, FATAL, "Invalid RFU state: 0x%02X", rfu->state);
 	}
 
 	mLOG(GBA_RFU, WARN, "RFU Err in state: 0x%02X", rfu->state);
+	_RFUSwitchState(rfu, RFU_ERR);
 	return 0x996600EE;
 }
 
@@ -223,8 +269,6 @@ void _RFUExecCommand(struct GBARFU* rfu) {
 				rfu->hosting = false;
 
 				rfu->xferLen = 0;
-				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
-				_RFUSwitchState(rfu, RFU_TRANS);
 				break;
 
 			case 0x11: // Signal strength? Num connections?
@@ -236,37 +280,27 @@ void _RFUExecCommand(struct GBARFU* rfu) {
 				rfu->xferBuf[1] = 0xFFFFFFFF;
 				rfu->xferLen = 1;
 
-				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
-				_RFUSwitchState(rfu, RFU_TRANS);
 				break;
 
 			case 0x14: // Something to do with error checking and client joining?
 			//VBAM does wierd stuff here. Bugs?
 			case 0x13: // Error checking? Get adapter ID?
 				//TODO: Start broadcasting room name?
-
-				rfu->xferLen = 1;
-				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
 				//TODO: What does real adapter uses as lower half?
 				//>800,000 copies sold in Japan alone, so not a true UUID, can't be unique
-				//Unless whole word is UUID, then 4 billion combos
-				//rfu->xferBuf[1] = (rfu->hosting ? 0x100 : RFUClientGetClientID(&rfu->net) << 16) | ((0 << 3) + 0x61f1); // VBAM uses 0x61f1, 0 is player #
-				rfu->xferBuf[1] = RFUClientGetClientID(&rfu->net);
-				_RFUSwitchState(rfu, RFU_TRANS);
+				//rfu->xferBuf[1] = (rfu->hosting ? 0x100 : RFUClientGetClientID(&rfu->net) << 16) | ((playerNum << 3) + 0x61f1); // VBAM uses 0x61f1
+				rfu->xferLen = 1;
+				rfu->xferBuf[1] = 0x02000000 | RFUClientGetClientID(&rfu->net);
 				break;
 
 			case 0x16: // Broadcast data
 				RFUClientSendBroadcastData(&rfu->net, rfu->xferBuf, rfu->xferLen);
 
 				rfu->xferLen = 0;
-				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
-				_RFUSwitchState(rfu, RFU_TRANS);
 				break;
 
 			case 0x17: // Setup
 				rfu->xferLen = 0;
-				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
-				_RFUSwitchState(rfu, RFU_TRANS);
 				break;
 
 			case 0x19: // Listen for client to join
@@ -276,8 +310,6 @@ void _RFUExecCommand(struct GBARFU* rfu) {
 				//rfu->clientID = 0;
 
 				rfu->xferLen = 0;
-				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
-				_RFUSwitchState(rfu, RFU_TRANS);
 				break;
 
 			case 0x1A: // SERVER: Check for connection from a client
@@ -287,19 +319,15 @@ void _RFUExecCommand(struct GBARFU* rfu) {
 
 				for (int i = 0; i < rfu->xferLen; i++) {
 					rfu->xferBuf[i+1] = clients[i];
-					mLOG(GBA_RFU, INFO, "Connection from 0x%08X", rfu->xferBuf[i+1]);
+					mLOG(GBA_RFU, DEBUG, "CONN READ 0x%08X", rfu->xferBuf[i+1]);
 				}
 
-				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
-				_RFUSwitchState(rfu, RFU_TRANS);
 				break;
 
 			case 0x1B: // SERVER: Resets something without causing client disconnect
 				//TODO: ??? clear broadcast data something ???
 
 				rfu->xferLen = 0;
-				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
-				_RFUSwitchState(rfu, RFU_TRANS);
 				break;
 
 			case 0x1C: // Clear internal buffers
@@ -308,8 +336,6 @@ void _RFUExecCommand(struct GBARFU* rfu) {
 				rfu->hosting = false;
 
 				rfu->xferLen = 0;
-				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
-				_RFUSwitchState(rfu, RFU_TRANS);
 				break;
 
 			case 0x1E: //Also reset some stuff??
@@ -319,17 +345,13 @@ void _RFUExecCommand(struct GBARFU* rfu) {
 				uint32_t const* bcastData = RFUClientGetBroadcastData(&rfu->net, &rfu->xferLen);
 				memcpy(rfu->xferBuf+1, bcastData, rfu->xferLen * sizeof(uint32_t));
 
-				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
-				_RFUSwitchState(rfu, RFU_TRANS);
 				break;
 
 			case 0x1F: //Connect to server
-				mLOG(GBA_RFU, INFO, "Connect to server 0x%08X", rfu->xferBuf[0]);
+				mLOG(GBA_RFU, DEBUG, "Connect to server 0x%08X", rfu->xferBuf[0]);
 				RFUClientConnectToServer(&rfu->net, rfu->xferBuf[0]);
 
 				rfu->xferLen = 0;
-				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
-				_RFUSwitchState(rfu, RFU_TRANS);
 				break;
 
 			case 0x20: // I have no idea what this does, related to 0x1F, probably implemented wrong
@@ -340,43 +362,51 @@ void _RFUExecCommand(struct GBARFU* rfu) {
 				rfu->xferBuf[1] = 0x00000000;
 
 				rfu->xferLen = 1;
-				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
-
-				_RFUSwitchState(rfu, RFU_TRANS);
 				break;
 
+			case 0x25: //Send data and block until data available
+				//Actual blocking is triggered by starting xfer w/ ext clock
 			case 0x24: //Send data to connected adapters
 				RFUClientSendDataToConnected(&rfu->net, rfu->xferBuf, rfu->xferLen);
 
 				rfu->xferLen = 0;
-				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
-				_RFUSwitchState(rfu, RFU_TRANS);
 				break;
 
 			case 0x26: //Receive data. Returns pending data
-			 	//TODO: Read from network queue
+				RFUClientReadMessage(&rfu->net, rfu->xferBuf+1, &rfu->xferLen);
+				break;
+
+			case 0x27: // Block until data is available
+				//Actual blocking is triggered by starting xfer w/ ext clock
 				rfu->xferLen = 0;
-				rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
-				_RFUSwitchState(rfu, RFU_TRANS);
 				break;
 
 			case 0xEE:
 				mLOG(GBA_RFU, WARN, "RFU Rx'd Err in state: 0x%02X", rfu->state);
 				_RFUSwitchState(rfu, RFU_INIT);
-				break;
+				return;
 			default:
 				mLOG(GBA_RFU, WARN, "Unimplemented command: 0x%02X", rfu->currCmd);
 	}
+	//Acknowledge command
+	rfu->xferBuf[0] = 0x99660080 | rfu->xferLen << 8 | rfu->currCmd;
+	_RFUSwitchState(rfu, RFU_TRANS);
+	rfu->polarityReversed = false;
 }
 
-void _RFUSendDataToGBA(struct GBA* gba, uint32_t data) {
+void _RFUSendDataToGBA(struct GBA* gba, uint32_t data, bool delay) {
 	gba->memory.io[REG_SIODATA32_HI >> 1] = (uint16_t) (data >> 16);
 	gba->memory.io[REG_SIODATA32_LO >> 1] = (uint16_t) data;
 	mLOG(GBA_RFU, DEBUG, "RFU TX: 0x%08X", data);
+	//printf("RFU TX: 0x%08X POL: %d\n", data, gba->memory.hw.rfu.polarityReversed);
 
 	//Schedule IRQ
-	gba->memory.hw.rfu.xferPending = true;
-	mTimingSchedule(&gba->timing, &gba->memory.hw.rfu.xferDoneEvent, 256);
+	if (delay) {
+		gba->memory.hw.rfu.xferPending = true;
+		mTimingSchedule(&gba->timing, &gba->memory.hw.rfu.xferDoneEvent, 256);
+	} else {
+		_RFUTransferCallback(0, &gba->memory.hw.rfu, 0);
+	}
 }
 
 void _RFUTransferCallback(struct mTiming* timing, void* user, uint32_t cyclesLate) {
@@ -388,13 +418,16 @@ void _RFUTransferCallback(struct mTiming* timing, void* user, uint32_t cyclesLat
 
 	mLOG(GBA_RFU, DEBUG, "RFU XFER COMPLETE (%d cycles late) IRQ: %d", cyclesLate, rfu->d.p->normalControl.irq);
 
-
 	//Should be only if rfu->state != RFU_INIT?
-	if (rfu->d.p->normalControl.idleSo) {
-		rfu->d.p->normalControl.si = rfu->polarityReversed;
-	} else {
-		rfu->d.p->normalControl.si = !rfu->polarityReversed;
-	}
+	// if (rfu->d.p->normalControl.idleSo) {
+	// 	rfu->d.p->normalControl.si = rfu->polarityReversed;
+	// } else {
+	// 	rfu->d.p->normalControl.si = !rfu->polarityReversed;
+	// }
+	//rfu->polarityReversed = !(rfu->d.p->siocnt & 1);
+	rfu->d.p->normalControl.si = !rfu->polarityReversed;
+	//rfu->d.p->siocnt |= (rfu->d.p->siocnt & 1) << 2;
+
 
 	rfu->xferPending = false;
 	rfu->d.p->normalControl.start = 0;

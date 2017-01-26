@@ -74,9 +74,6 @@ void _RFUSwitchState(struct GBARFU* rfu, enum GBARFUState state) {
 			//fallthrough
 			rfu->polarityReversed = false;
 		case RFU_READY:
-			//A roundabout way of making it so that polarity reversion takes effect after we finish sending the reply data
-			//rfu->polarityReversed = rfu->doRevPolarity;
-			//rfu->doRevPolarity = false;
 
 			//DON'T fallthrough, resetting index messes up TRANS
 			//Makes trans always send index 0 as last index
@@ -103,24 +100,14 @@ uint16_t _RFUSioWriteRegister(struct GBASIODriver* driver, uint32_t address, uin
                 val.siocnt = value;
 
 				uint32_t rxData = (driver->p->p->memory.io[REG_SIODATA32_HI >> 1] << 16) | (driver->p->p->memory.io[REG_SIODATA32_LO >> 1]);
-				mLOG(GBA_RFU, DEBUG, "REG_SIOCNT Write: 0x%04x PC: 0x%08X Rev: %d", value, driver->p->p->cpu->gprs[ARM_PC], rfu->polarityReversed);//(driver->p->p->memory.io[REG_SIODATA32_HI >> 1] << 16) | (driver->p->p->memory.io[REG_SIODATA32_LO >> 1]));
-				//mLOG(GBA_RFU, INFO, "RX DATA: 0x%08X STATE: 0x%02X", rxData, rfu->state);
-				//Acknowledge procedure ??
-				// if (val.normalControl.idleSo) {
-				// 	val.normalControl.si = 0;
-				// } else {
-				// 	val.normalControl.si = 1;
-				// }
+				//mLOG(GBA_RFU, DEBUG, "REG_SIOCNT Write: 0x%04x PC: 0x%08X Rev: %d", value, driver->p->p->cpu->gprs[ARM_PC], rfu->polarityReversed);//(driver->p->p->memory.io[REG_SIODATA32_HI >> 1] << 16) | (driver->p->p->memory.io[REG_SIODATA32_LO >> 1]));
 
-				// if (val.normalControl.idleSo) {
-				// 	val.normalControl.si = rfu->polarityReversed;
-				// } else {
-				// 	val.normalControl.si = !rfu->polarityReversed;
-				// }
-
-				if (rfu->polarityReversed) {
-					val.normalControl.si = !val.normalControl.si;
+				if (val.normalControl.idleSo) {
+					val.normalControl.si = rfu->polarityReversed;
+				} else {
+					val.normalControl.si = !rfu->polarityReversed;
 				}
+
 
 				//Fix for Mario Golf, force the clock speed to 2 MHz. Why is this needed?
 				if (val.normalControl.sc && !val.normalControl.si) {
@@ -130,8 +117,7 @@ uint16_t _RFUSioWriteRegister(struct GBASIODriver* driver, uint32_t address, uin
 				//Transfer with internal clock, used for most commands
 				if (val.normalControl.start && !rfu->xferPending && val.normalControl.sc) {
 
-					//uint32_t rxData = (driver->p->p->memory.io[REG_SIODATA32_HI >> 1] << 16) | (driver->p->p->memory.io[REG_SIODATA32_LO >> 1]);
-					mLOG(GBA_RFU, DEBUG, "RFU RX: 0x%08X", rxData);
+					//mLOG(GBA_RFU, INFO, "RFU RX: 0x%08X", rxData);
 					//printf("RFU RX: 0x%08X\n", rxData);
 
 					uint32_t xferData = _RFUTransferData(driver->p, rxData);
@@ -140,11 +126,10 @@ uint16_t _RFUSioWriteRegister(struct GBASIODriver* driver, uint32_t address, uin
 
 				//Transfer with external clock, used for blocking commands
 			} else if (val.normalControl.start && !rfu->xferPending && !val.normalControl.sc) { //  && (rfu->state != RFU_INIT)
-					mLOG(GBA_RFU, DEBUG, "Ext clock transfer: 0x%08X", rxData);
+					//mLOG(GBA_RFU, DEBUG, "Ext clock transfer: 0x%08X", rxData);
 					//printf("RFU ERX: 0x%08X\n", rxData);
 					if (rxData == 0x996600A8) {
 						//Read GBA's ack of 0x28
-						//rfu->polarityReversed = true;
 						_RFUSendDataToGBA(driver->p->p, 0x80000000, true);
 						_RFUSwitchState(rfu, RFU_READY);
 
@@ -152,9 +137,7 @@ uint16_t _RFUSioWriteRegister(struct GBASIODriver* driver, uint32_t address, uin
 						_RFUSwitchState(rfu, RFU_WAITING);
 					} else {
 						//Error
-						mLOG(GBA_RFU, WARN, "Invalid ext clock transfer: 0x%08X", rxData);
-						//_RFUSendDataToGBA(driver->p->p, 0x996600EE, true);
-						//_RFUSwitchState(rfu, RFU_ERR);
+						mLOG(GBA_RFU, INFO, "Invalid ext clock transfer: 0x%08X", rxData);
 						_RFUSwitchState(rfu, RFU_INIT);
 
 					}
@@ -165,15 +148,15 @@ uint16_t _RFUSioWriteRegister(struct GBASIODriver* driver, uint32_t address, uin
 				//driver->p->siocnt = value;
 				break;
 		case REG_SIODATA32_HI:
-			mLOG(GBA_RFU, DEBUG, "REG_SIODATA32_HI Write: 0x%04X", value);
+			//mLOG(GBA_RFU, DEBUG, "REG_SIODATA32_HI Write: 0x%04X", value);
 			driver->p->p->memory.io[REG_SIODATA32_HI >> 1] = value;
 			break;
 		case REG_SIODATA32_LO:
-			mLOG(GBA_RFU, DEBUG, "REG_SIODATA32_LO Write: 0x%04X", value);
+			//mLOG(GBA_RFU, DEBUG, "REG_SIODATA32_LO Write: 0x%04X", value);
 			driver->p->p->memory.io[REG_SIODATA32_LO >> 1] = value;
 			break;
 		case REG_RCNT:
-			mLOG(GBA_RFU, DEBUG, "REG_RCNT Write: 0x%04X", value);
+			//mLOG(GBA_RFU, DEBUG, "REG_RCNT Write: 0x%04X", value);
 			break;
 		default:
 			mLOG(GBA_RFU, STUB, "Stub SIO Reg 0x%08X Write: 0x%04X", address, value);
@@ -319,7 +302,7 @@ void _RFUExecCommand(struct GBARFU* rfu) {
 
 				for (int i = 0; i < rfu->xferLen; i++) {
 					rfu->xferBuf[i+1] = clients[i];
-					mLOG(GBA_RFU, DEBUG, "CONN READ 0x%08X", rfu->xferBuf[i+1]);
+					//mLOG(GBA_RFU, DEBUG, "CONN READ 0x%08X", rfu->xferBuf[i+1]);
 				}
 
 				break;
@@ -348,7 +331,7 @@ void _RFUExecCommand(struct GBARFU* rfu) {
 				break;
 
 			case 0x1F: //Connect to server
-				mLOG(GBA_RFU, DEBUG, "Connect to server 0x%08X", rfu->xferBuf[0]);
+				mLOG(GBA_RFU, INFO, "Connecting to server 0x%08X", rfu->xferBuf[0]);
 				RFUClientConnectToServer(&rfu->net, rfu->xferBuf[0]);
 
 				rfu->xferLen = 0;
@@ -381,6 +364,11 @@ void _RFUExecCommand(struct GBARFU* rfu) {
 				rfu->xferLen = 0;
 				break;
 
+			case 0x30: // Disconnect
+				RFUClientDisconnectAll(&rfu->net);
+				rfu->xferLen = 0;
+				break;
+
 			case 0xEE:
 				mLOG(GBA_RFU, WARN, "RFU Rx'd Err in state: 0x%02X", rfu->state);
 				_RFUSwitchState(rfu, RFU_INIT);
@@ -397,7 +385,7 @@ void _RFUExecCommand(struct GBARFU* rfu) {
 void _RFUSendDataToGBA(struct GBA* gba, uint32_t data, bool delay) {
 	gba->memory.io[REG_SIODATA32_HI >> 1] = (uint16_t) (data >> 16);
 	gba->memory.io[REG_SIODATA32_LO >> 1] = (uint16_t) data;
-	mLOG(GBA_RFU, DEBUG, "RFU TX: 0x%08X", data);
+	//mLOG(GBA_RFU, INFO, "RFU TX: 0x%08X", data);
 	//printf("RFU TX: 0x%08X POL: %d\n", data, gba->memory.hw.rfu.polarityReversed);
 
 	//Schedule IRQ
@@ -412,11 +400,11 @@ void _RFUSendDataToGBA(struct GBA* gba, uint32_t data, bool delay) {
 void _RFUTransferCallback(struct mTiming* timing, void* user, uint32_t cyclesLate) {
 
 	UNUSED(timing);
-	//UNUSED(cyclesLate);
+	UNUSED(cyclesLate);
 
 	struct GBARFU* rfu = user;
 
-	mLOG(GBA_RFU, DEBUG, "RFU XFER COMPLETE (%d cycles late) IRQ: %d", cyclesLate, rfu->d.p->normalControl.irq);
+	//mLOG(GBA_RFU, DEBUG, "RFU XFER COMPLETE (%d cycles late) IRQ: %d", cyclesLate, rfu->d.p->normalControl.irq);
 
 	//Should be only if rfu->state != RFU_INIT?
 	// if (rfu->d.p->normalControl.idleSo) {

@@ -80,7 +80,7 @@ void RFUClientUpdate(struct RFUClient* client) {
     if (client->state == RFUCLIENT_LEN) {
         SocketRecv(client->socket, &client->netLen, 1);
         client->state = RFUCLIENT_CMD;
-        mLOG(GBA_RFU, INFO, "Packet Length: %d", client->netLen);
+        //mLOG(GBA_RFU, INFO, "Packet Length: %d", client->netLen);
     }
 
     sock = client->socket;
@@ -90,7 +90,7 @@ void RFUClientUpdate(struct RFUClient* client) {
 
     if (client->state == RFUCLIENT_CMD) {
         SocketRecv(client->socket, &client->netCmd, 1);
-        mLOG(GBA_RFU, INFO, "Packet Command: 0x%02X", client->netCmd);
+        //mLOG(GBA_RFU, INFO, "Packet Command: 0x%02X", client->netCmd);
         client->state = RFUCLIENT_CID;
     }
 
@@ -113,7 +113,7 @@ void RFUClientUpdate(struct RFUClient* client) {
         SocketRecv(client->socket, client->rxBuf + 1, 1);
         client->netIndex = 0;
 
-        mLOG(GBA_RFU, INFO, "Packet CID: 0x%04X", (client->rxBuf[0] << 8) | client->rxBuf[1]);
+        //mLOG(GBA_RFU, INFO, "Packet CID: 0x%04X", (client->rxBuf[0] << 8) | client->rxBuf[1]);
 
         if (client->netLen) {
             client->state = RFUCLIENT_DATA;
@@ -132,7 +132,7 @@ void RFUClientUpdate(struct RFUClient* client) {
             }
 
             SocketRecv(client->socket, client->rxBuf + client->netIndex, 1);
-            mLOG(GBA_RFU, DEBUG, "Got byte %d: %02X", client->netIndex, client->rxBuf[client->netIndex]);
+            //mLOG(GBA_RFU, DEBUG, "Got byte %d: %02X", client->netIndex, client->rxBuf[client->netIndex]);
             client->netIndex++;
             if (client->netIndex == client->netLen * 4) {
                 client->netIndex = 0;
@@ -152,7 +152,7 @@ void _RFUClientExecCommand(struct RFUClient* client) {
                 client->bcastLen = client->netLen;
                 for (int i = 0; i < client->bcastLen; ++i) {
                     client->bcastData[i] = ntohl(rxBuf[i]);
-                    mLOG(GBA_RFU, DEBUG, "BCAST RX \t0x%02X: 0x%08X", i, client->bcastData[i]);
+                    //mLOG(GBA_RFU, DEBUG, "BCAST RX \t0x%02X: 0x%08X", i, client->bcastData[i]);
                 }
             }
             break;
@@ -178,8 +178,21 @@ void _RFUClientExecCommand(struct RFUClient* client) {
 
                 for (int i = 0; i < msg.len; ++i) {
                     msg.data[i] = ntohl(rxBuf[i]);
-                    mLOG(GBA_RFU, INFO, "DATA RX \t0x%02X: 0x%08X", i, msg.data[i]);
+                    // mLOG(GBA_RFU, INFO, "DATA RX \t0x%02X: 0x%08X", i, msg.data[i]);
                 }
+                MessageQueueClear(&client->msgQueue);
+                MessageQueueEnqueue(&client->msgQueue, msg);
+            }
+            break;
+
+        case 0x30:
+            {
+                struct Message msg;
+                msg.len = 0;
+                msg.data = 0;
+
+                mLOG(GBA_RFU, INFO, "Disconnecting");
+
                 MessageQueueClear(&client->msgQueue);
                 MessageQueueEnqueue(&client->msgQueue, msg);
             }
@@ -213,9 +226,9 @@ void RFUClientSendDataToConnected(struct RFUClient* client, uint32_t* data, uint
 void RFUClientSendBroadcastData(struct RFUClient* client, uint32_t* data, uint8_t len) {
     //Send out data
 
-    for (int i = 0; i < len; ++i) {
-		mLOG(GBA_RFU, DEBUG, "BCAST \t0x%02X: 0x%08X", i, data[i]);
-	}
+    // for (int i = 0; i < len; ++i) {
+	// 	mLOG(GBA_RFU, DEBUG, "BCAST \t0x%02X: 0x%08X", i, data[i]);
+	// }
 
     uint32_t txBuf = len << 24 | 0x00160000 | ((client->clientID) & 0xFFFF);
 
@@ -258,10 +271,13 @@ void RFUClientReadMessage(struct RFUClient* client, uint32_t* buf, uint8_t* len)
         memcpy(buf, msg.data, msg.len * sizeof(uint32_t));
 
         for (int i = 0; i < *len; i++) {
-            mLOG(GBA_RFU, INFO, "RECV \t0x%02X: 0x%08X", i, buf[i]);
+            //mLOG(GBA_RFU, INFO, "RECV \t0x%02X: 0x%08X", i, buf[i]);
         }
 
-        free(msg.data);
+        if (msg.data) {
+            free(msg.data);
+        }
+
     } else {
         *len = 0;
     }
@@ -281,6 +297,11 @@ uint32_t const* RFUClientGetClientList(struct RFUClient* client, uint8_t* len) {
 }
 
 void RFUClientDisconnectAll(struct RFUClient* client) {
-    //TODO: Tell mgba-server to disconnect
+    mLOG(GBA_RFU, INFO, "Disconnecting");
+
+    uint32_t txBuf = 0x00 << 24 | 0x00300000 | ((client->clientID) & 0xFFFF);
+    txBuf = htonl(txBuf);
+    SocketSend(client->socket, &txBuf, sizeof(txBuf));
+
     ClientListClear(&client->clientList);
 }
